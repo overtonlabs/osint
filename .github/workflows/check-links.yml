@@ -1,0 +1,49 @@
+# Quality gate for a repository whose product is a list of links.
+#
+# Runs on pull requests and pushes so a bad link cannot reach the published
+# site, and on a monthly schedule because the failure mode this guards against
+# is a third-party site going away long after the link was last edited.
+name: Check links
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  schedule:
+    # 07:00 UTC on the first of each month.
+    - cron: '0 7 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "check-links-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Offline assertions on the shipped artifact: the pinned custom domain,
+      # the referrer-suppressing rel on every anchor, domain agreement across
+      # CNAME/canonical/sitemap/robots. No network required.
+      - name: Site invariants
+        run: ./tests/test-site-invariants.sh
+
+      # Control tests proving each verification strategy can still return a
+      # failing verdict. Without these, a strategy could silently decay into
+      # one that always passes.
+      - name: Verification strategy control tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tests/test-check-links.sh
+
+      # The actual link check over the published page and the README.
+      - name: Check links
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/check-links.sh
